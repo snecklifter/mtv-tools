@@ -1,0 +1,86 @@
+---
+- name: Gather vm info
+  community.vmware.vmware_guest_info:
+    hostname: "{{ vcenter_hostname }}"
+    username: "{{ vcenter_username }}"
+    password: "{{ vcenter_password }}"
+    datacenter: "{{ vcenter_datacenter }}"
+    validate_certs: false
+    name: "{{ vm_name }}"
+  register: guest_info
+
+#- name: Set powerstate of vm to off
+#  community.vmware.vmware_guest_powerstate:
+#    hostname: "{{ vcenter_hostname }}"
+#    username: "{{ vcenter_username }}"
+#    password: "{{ vcenter_password }}"
+#    folder: "{{ guest_info.instance.hw_folder }}"
+#    name: "{{ guest_info.instance.hw_name }}"
+#    state: powered-off
+
+- name: Gather disk info
+  community.vmware.vmware_guest_disk_info:
+    hostname: "{{ vcenter_hostname }}"
+    username: "{{ vcenter_username }}"
+    password: "{{ vcenter_password }}"
+    name: "{{ vm_name }}"
+    datacenter: "{{ vcenter_datacenter }}"
+  register: disk_info
+
+- name: Initialize disk ID list
+  set_fact:
+    disk_ids: []
+
+- name: Construct disk IDs
+  set_fact:
+    disk_ids: >-
+      {{ disk_ids + [
+        (
+          "scsi" ~ item.value.controller_bus_number ~ ":" ~ item.value.unit_number
+          if item.value.controller_type in ['lsilogicsas', 'buslogic', 'pvscsi']
+          else
+          "sata" ~ item.value.controller_bus_number ~ ":" ~ item.value.unit_number
+          if item.value.controller_type == 'sata'
+          else
+          "ide" ~ item.value.controller_bus_number ~ ":" ~ item.value.unit_number
+          if item.value.controller_type == 'ide'
+          else
+          "unknown"
+        )
+      ] }}
+  with_dict: "{{ disk_info.guest_disk_info }}"
+
+- name: Display the disk IDs
+  debug:
+    var: disk_ids
+
+- name: Print advanced settings before
+  debug:
+    msg: "{{ guest_info.instance.advanced_settings }}"
+
+- name: Set CBT values 
+  community.vmware.vmware_guest:
+    hostname: "{{ vcenter_hostname }}"
+    username: "{{ vcenter_username }}"
+    password: "{{ vcenter_password }}"
+    name: "{{ vm_name }}"
+    advanced_settings:
+      - key: "{{ item }}.ctkEnable"
+        value: "TRUE"
+      - key: "ctkEnabled"
+        value: "TRUE"
+  loop: "{{ disk_ids }}"
+
+- name: Gather vm info
+  community.vmware.vmware_guest_info:
+    hostname: "{{ vcenter_hostname }}"
+    username: "{{ vcenter_username }}"
+    password: "{{ vcenter_password }}"
+    datacenter: "{{ vcenter_datacenter }}"
+    validate_certs: false
+    name: "{{ vm_name }}"
+  register: guest_info
+
+- name: Print advanced settings after
+  debug:
+    msg: "{{ guest_info.instance.advanced_settings }}"
